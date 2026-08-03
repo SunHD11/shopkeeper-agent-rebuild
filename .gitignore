@@ -1,0 +1,23 @@
+# Python
+.venv/
+.uv-cache/
+.pre-commit-cache/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+
+# Local configuration and logs
+.env
+logs/
+
+# IDEs and operating systems
+.idea/
+.vscode/*
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Large local TEI model files
+docker/embedding/
