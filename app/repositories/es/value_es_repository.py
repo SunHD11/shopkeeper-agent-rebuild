@@ -1,53 +1,162 @@
 """
 字段真实取值 Elasticsearch Repository。
 
-负责创建字段值索引、批量写入 ValueInfo，
-以及把 Elasticsearch 的搜索结果还原成业务实体。
+这个 Repository 负责：
 
-DW Repository 负责读取真实值，Service 负责组装 ValueInfo，
-本 Repository 只关心这些值如何写入和查询。
+1. 创建用于保存字段真实值的 Elasticsearch 索引；
+2. 将 ValueInfo 实体分批写入 Elasticsearch；
+3. 根据用户输入搜索真实字段值；
+4. 把 Elasticsearch 返回结果转换回 ValueInfo 实体。
+
+它不负责从 DW MySQL 读取数据，也不负责创建 ValueInfo。
+这些工作由 DWMySQLRepository 和 Service 层完成。
 """
 
+# asdict() 可以把 dataclass 对象转换成普通字典。
+#
+# 例如：
+#
+# ValueInfo(
+#     id="dim_region.region_name.华东",
+#     value="华东",
+#     column_id="dim_region.region_name",
+# )
+#
+# 转换后：
+#
+# {
+#     "id": "dim_region.region_name.华东",
+#     "value": "华东",
+#     "column_id": "dim_region.region_name",
+# }
 from dataclasses import asdict
 
+# AsyncElasticsearch 是 Elasticsearch 官方提供的异步客户端。
+#
+# 因为创建索引、批量写入和查询都是网络操作，
+# 所以这里使用异步客户端，后面的方法也都使用 async/await。
 from elasticsearch import AsyncElasticsearch
 
+# ValueInfo 是项目内部表示“字段真实取值”的业务实体。
+#
+# Repository 对外接收和返回 ValueInfo，
+# 从而避免 Service 层直接依赖 Elasticsearch 的数据格式。
 from app.entities.value_info import ValueInfo
 
 
 class ValueESRepository:
-    """负责字段真实取值索引的创建、写入和查询。"""
+    """
+    负责字段真实取值在 Elasticsearch 中的创建、写入和查询。
 
-    # 所有字段真实值统一保存在这个索引中。
+    例如：
+
+    “华东”属于 dim_region.region_name
+    “黄金会员”属于 dim_customer.level_name
+    “已支付”属于 fact_order.order_status
+    """
+
+    # 所有字段真实值统一保存到这个索引中。
+    #
+    # Elasticsearch 中的索引可以理解为：
+    # 一组结构相似的文档集合。
     index_name = "value_index"
 
-    # Elasticsearch Mapping 用来声明文档字段如何建立索引。
+    # 定义 Elasticsearch 索引中每个字段的类型。
+    #
+    # 这类似于 MySQL 的建表结构，但 Elasticsearch 使用 mapping。
     index_mappings = {
-        # 未声明字段不会被 Elasticsearch 自动建立为可检索字段。
+        # 禁止 Elasticsearch 根据未知字段自动生成 Mapping。
+        #
+        # 如果文档里出现 Mapping 没有声明的字段，
+        # 这些字段不会被自动建立为可检索字段。
         "dynamic": False,
         "properties": {
-            # 业务唯一标识需要精确匹配，因此使用 keyword。
-            "id": {"type": "keyword"},
-            # 真实字段值需要支持中文检索，因此使用 text 和 IK 分词器。
+            # ValueInfo.id 是文档的业务唯一标识。
+            #
+            # keyword 不会进行分词，适合：
+            # - 精确匹配
+            # - 排序
+            # - 聚合
+            "id": {
+                "type": "keyword",
+            },
+            # value 保存字段的真实业务值，例如：
+            # 华东、广东省、黄金会员、已支付。
+            #
+            # text 类型会进行分词，因此适合全文检索。
             "value": {
                 "type": "text",
+                # 写入文档时使用 IK 最细粒度分词。
+                #
+                # 例如：
+                # “广东省深圳市”
+                #
+                # 可能拆分成：
+                # 广东省、广东、深圳市、深圳等词语。
                 "analyzer": "ik_max_word",
+                # 用户搜索时同样使用 IK 分词。
                 "search_analyzer": "ik_max_word",
             },
-            # 所属字段 id 需要精确匹配，因此使用 keyword。
-            "column_id": {"type": "keyword"},
+            # column_id 表示这个业务值属于哪个字段。
+            #
+            # 例如：
+            # “华东”属于 dim_region.region_name。
+            #
+            # column_id 需要完整精确匹配，因此使用 keyword。
+            "column_id": {
+                "type": "keyword",
+            },
         },
     }
 
-    def __init__(self, client: AsyncElasticsearch):
-        """接收由客户端管理器创建的异步 Elasticsearch Client。"""
+    def __init__(
+        self,
+        client: AsyncElasticsearch,
+    ):
+        """
+        接收外部创建好的 Elasticsearch 异步客户端。
+
+        参数：
+            client：
+                已经初始化的 AsyncElasticsearch。
+
+        Repository 不负责创建和关闭 Client，
+        它只使用传入的 Client 操作 Elasticsearch。
+        """
+
+        # 保存成实例属性。
+        #
+        # 后面的 ensure_index()、index() 和 search()
+        # 都通过 self.client 使用同一个 Elasticsearch 客户端。
         self.client = client
 
     async def ensure_index(self):
-        """确保字段真实值索引存在，不存在时按 Mapping 创建。"""
-        if not await self.client.indices.exists(index=self.index_name):
+        """
+        确保 value_index 索引存在。
+
+        如果索引已经存在：
+            不执行创建操作。
+
+        如果索引不存在：
+            使用 index_mappings 创建索引。
+
+        这个方法可以让元数据构建流程重复执行，
+        不会因为索引已经存在而创建失败。
+        """
+
+        # client.indices 用于执行 Elasticsearch 索引级别的操作。
+        #
+        # exists() 查询指定索引是否已经存在。
+        index_exists = await self.client.indices.exists(
+            index=self.index_name,
+        )
+
+        # 只有索引不存在时才创建。
+        if not index_exists:
             await self.client.indices.create(
+                # 创建的索引名称。
                 index=self.index_name,
+                # 使用类中定义的字段 Mapping。
                 mappings=self.index_mappings,
             )
 
@@ -56,18 +165,61 @@ class ValueESRepository:
         value_infos: list[ValueInfo],
         batch_size: int = 20,
     ):
-        """把 ValueInfo 按 batch_size 分批写入 Elasticsearch。"""
-        # 空列表不需要向 Elasticsearch 发送 Bulk 请求。
+        """
+        将字段真实值分批写入 Elasticsearch。
+
+        参数：
+            value_infos：
+                等待写入的 ValueInfo 实体列表。
+
+            batch_size：
+                每批最多写入多少个 ValueInfo，默认是 20。
+
+        Elasticsearch Bulk API 要求操作指令和文档内容交替出现。
+        """
+
+        # 如果没有任何数据，直接结束。
+        #
+        # 这样可以避免向 Elasticsearch 发送一次没有意义的空请求。
         if not value_infos:
             return
 
-        for i in range(0, len(value_infos), batch_size):
+        # 按照 batch_size 对 ValueInfo 进行分批。
+        #
+        # 假设一共有 45 条数据，batch_size=20：
+        #
+        # 第一批：value_infos[0:20]
+        # 第二批：value_infos[20:40]
+        # 第三批：value_infos[40:60]
+        for i in range(
+            0,
+            len(value_infos),
+            batch_size,
+        ):
+            # 获取当前批次的数据。
             batch = value_infos[i : i + batch_size]
+
+            # 保存当前批次对应的 Elasticsearch Bulk 操作。
+            #
+            # Bulk API 的数据格式是：
+            #
+            # [
+            #     操作说明,
+            #     文档内容,
+            #     操作说明,
+            #     文档内容,
+            # ]
             batch_operations = []
 
             for value_info in batch:
-                # Bulk API 要求每份文档前面先放一条操作描述。
-                # 使用稳定的 ValueInfo.id 作为 ES _id，重复构建时会覆盖同一文档。
+                # 第一部分：告诉 Elasticsearch 要执行什么操作。
+                #
+                # 这里使用 index：
+                # - 文档不存在时创建；
+                # - 文档已经存在时覆盖。
+                #
+                # _id 使用 ValueInfo.id，
+                # 因此重复构建知识库时不会产生同 ID 的重复文档。
                 batch_operations.append(
                     {
                         "index": {
@@ -77,10 +229,18 @@ class ValueESRepository:
                     }
                 )
 
-                # ValueInfo 是 dataclass，asdict() 将其转换为普通字典。
+                # 第二部分：真正要写入的文档内容。
+                #
+                # ValueInfo 是 dataclass，
+                # asdict() 将它转换成 Elasticsearch 可以接收的普通字典。
                 batch_operations.append(asdict(value_info))
 
-            await self.client.bulk(operations=batch_operations)
+            # 将当前批次一次性写入 Elasticsearch。
+            #
+            # bulk() 是网络操作，因此需要 await。
+            await self.client.bulk(
+                operations=batch_operations,
+            )
 
     async def search(
         self,
@@ -88,13 +248,68 @@ class ValueESRepository:
         score_threshold: float = 0.6,
         limit: int = 20,
     ) -> list[ValueInfo]:
-        """按关键词检索字段真实值，并还原成 ValueInfo 实体。"""
+        """
+        根据关键词搜索字段真实值。
+
+        参数：
+            keyword：
+                用户问题中可能出现的业务值，例如“华东”。
+
+            score_threshold：
+                Elasticsearch 最低相关性分数。
+                低于这个分数的结果不会返回。
+
+            limit：
+                最多返回多少条结果，默认 20。
+
+        返回：
+            ValueInfo 业务实体列表。
+        """
+
+        # 在 value 字段上执行 match 查询。
+        #
+        # match 查询会使用 Mapping 中配置的分词器，
+        # 因此适合查询中文业务词。
         response = await self.client.search(
+            # 指定查询哪个索引。
             index=self.index_name,
-            query={"match": {"value": keyword}},
+            # 搜索 value 字段。
+            query={
+                "match": {
+                    "value": keyword,
+                }
+            },
+            # 限制最多返回多少条结果。
             size=limit,
+            # 过滤掉相关性分数过低的结果。
             min_score=score_threshold,
         )
 
-        # Elasticsearch 的业务文档保存在每条命中的 _source 中。
+        # Elasticsearch 返回结构大致如下：
+        #
+        # {
+        #     "hits": {
+        #         "hits": [
+        #             {
+        #                 "_id": "...",
+        #                 "_score": 1.2,
+        #                 "_source": {
+        #                     "id": "...",
+        #                     "value": "华东",
+        #                     "column_id": "dim_region.region_name",
+        #                 },
+        #             }
+        #         ]
+        #     }
+        # }
+        #
+        # 真正的业务文档保存在每个 hit 的 _source 中。
+        #
+        # ValueInfo(**hit["_source"]) 相当于：
+        #
+        # ValueInfo(
+        #     id=hit["_source"]["id"],
+        #     value=hit["_source"]["value"],
+        #     column_id=hit["_source"]["column_id"],
+        # )
         return [ValueInfo(**hit["_source"]) for hit in response["hits"]["hits"]]
