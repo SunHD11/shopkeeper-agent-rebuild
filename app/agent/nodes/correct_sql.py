@@ -21,7 +21,7 @@ from app.prompt.prompt_loader import load_prompt
 async def correct_sql(
     state: DataAgentState,
     runtime: Runtime[DataAgentContext],
-) -> dict[str, str]:
+) -> dict[str, str | int]:
     """根据数据库校验错误修正候选 SQL，并覆盖 State 中的 sql。"""
 
     writer = runtime.stream_writer
@@ -96,7 +96,10 @@ async def correct_sql(
 
         # 相同 State Key 会被 LangGraph 覆盖，所以后续 run_sql 读取到的是
         # 修正后的 SQL，而不是最初 generate_sql 生成的版本。
-        return {"sql": result}
+        return {
+            "sql": result,
+            "sql_correction_attempts": state.get("sql_correction_attempts", 0) + 1,
+        }
 
     except Exception as error:
         logger.error(f"{step}失败: {error}")

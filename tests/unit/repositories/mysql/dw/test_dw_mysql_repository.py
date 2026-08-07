@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.sql_security import UnsafeSQLError
 from app.repositories.mysql.dw.dw_mysql_repository import DWMySQLRepository
 
 
@@ -100,12 +101,28 @@ async def test_validate_uses_explain() -> None:
     assert str(statement) == "explain select * from fact_order"
 
 
+async def test_validate_rejects_write_sql_before_database_access() -> None:
+    """危险 SQL 不得进入 EXPLAIN，更不能依赖数据库碰运气拦截。"""
+
+    session = AsyncMock(spec=AsyncSession)
+    repository = DWMySQLRepository(session)
+
+    try:
+        await repository.validate("DELETE FROM fact_order")
+    except UnsafeSQLError as error:
+        assert "SELECT 或 WITH" in str(error)
+    else:
+        raise AssertionError("危险 SQL 应被拒绝")
+
+    session.execute.assert_not_awaited()
+
+
 async def test_run_returns_dictionary_rows() -> None:
     """最终查询结果会转换成普通字典列表。"""
 
     session = AsyncMock(spec=AsyncSession)
     result = Mock()
-    result.mappings.return_value.fetchall.return_value = [
+    result.mappings.return_value.fetchmany.return_value = [
         {"region_name": "华东", "gmv": 10000},
         {"region_name": "华南", "gmv": 8000},
     ]
@@ -120,3 +137,21 @@ async def test_run_returns_dictionary_rows() -> None:
     ]
     statement = session.execute.await_args.args[0]
     assert str(statement) == "select region_name, gmv from result"
+    result.mappings.return_value.fetchmany.assert_called_once_with(
+        repository.max_result_rows
+    )
+
+
+async def test_run_accepts_one_trailing_semicolon() -> None:
+    """模型输出的单个结尾分号会被移除后再执行。"""
+
+    session = AsyncMock(spec=AsyncSession)
+    result = Mock()
+    result.mappings.return_value.fetchmany.return_value = []
+    session.execute.return_value = result
+    repository = DWMySQLRepository(session)
+
+    await repository.run("select 1;")
+
+    statement = session.execute.await_args.args[0]
+    assert str(statement) == "select 1"

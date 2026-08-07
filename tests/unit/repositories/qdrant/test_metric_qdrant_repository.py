@@ -12,6 +12,13 @@ from app.repositories.qdrant.metric_qdrant_repository import (
 )
 
 
+def test_collection_name_comes_from_rebuild_config() -> None:
+    assert (
+        MetricQdrantRepository.collection_name
+        == app_config.qdrant.metric_collection_name
+    )
+
+
 async def test_ensure_collection_skips_creation_when_collection_exists() -> None:
     """指标集合已经存在时，不应重复创建。"""
 

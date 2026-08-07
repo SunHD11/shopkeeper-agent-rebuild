@@ -13,7 +13,8 @@ Service 只决定“先做什么、后做什么以及数据如何组合”，
 具体数据库读写操作仍然交给各个 Repository。
 """
 
-# uuid4() 为每段需要检索的文本生成独立 Qdrant Point ID。
+# uuid5() 根据业务对象和文本槽位生成稳定 Qdrant Point ID。
+# 相同配置重复构建时会覆盖已有 Point，而不是不断产生重复向量。
 import uuid
 
 # asdict() 把 dataclass 业务实体转换成普通字典，作为 Qdrant payload。
@@ -162,8 +163,8 @@ class MetaKnowledgeService:
         # 表和字段放入同一笔事务。
         # 任一步保存失败，事务都会回滚，避免产生半成品数据。
         async with self.meta_mysql_repository.session.begin():
-            self.meta_mysql_repository.save_table_infos(table_infos)
-            self.meta_mysql_repository.save_column_infos(column_infos)
+            await self.meta_mysql_repository.save_table_infos(table_infos)
+            await self.meta_mysql_repository.save_column_infos(column_infos)
 
         # 后续字段向量和字段值索引都继续使用这份完整字段实体。
         return column_infos
@@ -190,7 +191,10 @@ class MetaKnowledgeService:
             # 入口一：字段真实名称，例如 order_amount。
             points.append(
                 {
-                    "id": uuid.uuid4(),
+                    "id": uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"shopkeeper:column:{column_info.id}:name",
+                    ),
                     "embedding_text": column_info.name,
                     "payload": asdict(column_info),
                 }
@@ -199,17 +203,23 @@ class MetaKnowledgeService:
             # 入口二：字段业务描述，例如“订单金额”。
             points.append(
                 {
-                    "id": uuid.uuid4(),
+                    "id": uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"shopkeeper:column:{column_info.id}:description",
+                    ),
                     "embedding_text": column_info.description,
                     "payload": asdict(column_info),
                 }
             )
 
             # 入口三：字段的每一个业务别名，例如“销售额”“收入”。
-            for alia in column_info.alias:
+            for alias_index, alia in enumerate(column_info.alias):
                 points.append(
                     {
-                        "id": uuid.uuid4(),
+                        "id": uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"shopkeeper:column:{column_info.id}:alias:{alias_index}",
+                        ),
                         "embedding_text": alia,
                         "payload": asdict(column_info),
                     }
@@ -331,8 +341,8 @@ class MetaKnowledgeService:
 
         # 指标本身和字段依赖关系必须在同一事务中保存。
         async with self.meta_mysql_repository.session.begin():
-            self.meta_mysql_repository.save_metric_infos(metric_infos)
-            self.meta_mysql_repository.save_column_metrics(column_metrics)
+            await self.meta_mysql_repository.save_metric_infos(metric_infos)
+            await self.meta_mysql_repository.save_column_metrics(column_metrics)
 
         return metric_infos
 
@@ -355,7 +365,10 @@ class MetaKnowledgeService:
             # 入口一：指标标准名称，例如 GMV。
             points.append(
                 {
-                    "id": uuid.uuid4(),
+                    "id": uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"shopkeeper:metric:{metric_info.id}:name",
+                    ),
                     "embedding_text": metric_info.name,
                     "payload": asdict(metric_info),
                 }
@@ -364,17 +377,23 @@ class MetaKnowledgeService:
             # 入口二：指标业务描述。
             points.append(
                 {
-                    "id": uuid.uuid4(),
+                    "id": uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"shopkeeper:metric:{metric_info.id}:description",
+                    ),
                     "embedding_text": metric_info.description,
                     "payload": asdict(metric_info),
                 }
             )
 
             # 入口三：指标的每一个别名，例如“成交总额”。
-            for alia in metric_info.alias:
+            for alias_index, alia in enumerate(metric_info.alias):
                 points.append(
                     {
-                        "id": uuid.uuid4(),
+                        "id": uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"shopkeeper:metric:{metric_info.id}:alias:{alias_index}",
+                        ),
                         "embedding_text": alia,
                         "payload": asdict(metric_info),
                     }

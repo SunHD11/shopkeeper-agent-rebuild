@@ -1,6 +1,7 @@
 # shopkeeper-agent-rebuild
 
-从零复现电商问数 Agent。当前已完成开发环境、基础服务，以及应用基础设施层。
+从零复现电商问数 Agent。当前已完成离线元数据知识库、在线 RAG Agent、
+LangGraph 编排、FastAPI SSE 接口，以及真实基础服务集成验证。
 
 ## 当前开发基线
 
@@ -15,16 +16,40 @@
 
 ## 当前复现进度
 
-第三轮已建立应用访问基础服务所需的公共层：
+当前项目已经打通：
 
-- `app/conf`：YAML + `.env` 结构化配置
-- `app/core`：请求 ID 上下文与 Loguru 日志
-- `app/clients`：MySQL、Qdrant、Elasticsearch、Embedding 客户端管理器
-- `app/scripts/check_clients.py`：统一真实连接检查
-- `tests/unit`：不依赖 Docker 的快速单元测试
-- `tests/integration`：连接真实本地服务的集成测试
+- `conf/meta_config.yaml + DW MySQL -> Meta MySQL` 的结构化元数据链路；
+- 字段和指标描述 `-> Embedding -> Qdrant` 的向量检索链路；
+- 字段真实值 `-> Elasticsearch` 的全文检索链路；
+- 三路召回、元数据合并、过滤、SQL 生成、校验、修正和执行的 Agent Graph；
+- `POST /api/query -> QueryService -> LangGraph -> SSE` 的在线接口；
+- Meta MySQL 幂等更新、Qdrant 稳定 Point ID 和 rebuild 专属 Collection；
+- SQL 应用层只读检查、30 秒超时、最多 1000 行结果，以及修正后重新校验。
 
 客户端采用显式生命周期：应用启动时执行 `init()`，退出时在 `finally` 中执行 `close()`。
+
+## 构建元数据知识库
+
+基础服务健康后执行：
+
+```powershell
+uv run python -m app.scripts.build_meta_knowledge -c conf/meta_config.yaml
+```
+
+构建命令可以重复执行；相同配置会更新现有 MySQL 记录、Qdrant Point 和
+Elasticsearch 文档，不会因为重复主键失败或不断累积相同向量。
+
+## 启动在线问数 API
+
+请先在本机 `.env` 中填写具有可用额度的 `LLM_API_KEY`，然后执行：
+
+```powershell
+uv run fastapi dev main.py
+```
+
+Swagger 位于 `http://127.0.0.1:8000/docs`。真实问数请求会访问配置中的外部
+LLM；密钥无效时返回 401，账户余额不足时返回 402，这两类错误都会被转换为
+最后一条 SSE `type=error` 事件。
 
 ## 完全独立服务模式
 

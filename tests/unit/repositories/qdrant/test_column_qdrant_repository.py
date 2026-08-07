@@ -12,6 +12,13 @@ from app.repositories.qdrant.column_qdrant_repository import (
 )
 
 
+def test_collection_name_comes_from_rebuild_config() -> None:
+    assert (
+        ColumnQdrantRepository.collection_name
+        == app_config.qdrant.column_collection_name
+    )
+
+
 async def test_ensure_collection_skips_creation_when_collection_exists() -> None:
     """字段集合已经存在时，不应重复创建。"""
 

@@ -172,3 +172,7 @@ class DataAgentState(TypedDict):
     # - 校验失败时为数据库错误字符串，Graph 会进入 correct_sql。
     # 原项目标注为 str，但实际成功分支会返回 None，因此这里使用联合类型表达真实状态。
     error: str | None
+
+    # 已经调用 correct_sql 的次数。Graph 只允许一次自动修正：修正后的 SQL
+    # 必须重新通过 validate_sql；如果仍失败则终止，避免形成无限校正循环。
+    sql_correction_attempts: int

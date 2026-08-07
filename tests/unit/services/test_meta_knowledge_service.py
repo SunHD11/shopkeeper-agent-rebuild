@@ -173,8 +173,8 @@ async def test_save_tables_combines_yaml_and_dw_metadata() -> None:
         call("fact_order", "region_name"),
     ]
     meta_repository.session.begin.assert_called_once_with()
-    meta_repository.save_table_infos.assert_called_once_with(expected_table_infos)
-    meta_repository.save_column_infos.assert_called_once_with(expected_column_infos)
+    meta_repository.save_table_infos.assert_awaited_once_with(expected_table_infos)
+    meta_repository.save_column_infos.assert_awaited_once_with(expected_column_infos)
 
 
 async def test_save_column_info_builds_name_description_and_alias_points() -> None:
@@ -196,7 +196,7 @@ async def test_save_column_info_builds_name_description_and_alias_points() -> No
     embedding_client.aembed_documents.return_value = embeddings
 
     with patch(
-        "app.services.meta_knowledge_service.uuid.uuid4",
+        "app.services.meta_knowledge_service.uuid.uuid5",
         side_effect=point_ids,
     ):
         await service._save_column_info_to_qdrant([column_info])
@@ -236,7 +236,7 @@ async def test_save_column_info_embeds_texts_in_batches_of_twenty() -> None:
     ]
 
     with patch(
-        "app.services.meta_knowledge_service.uuid.uuid4",
+        "app.services.meta_knowledge_service.uuid.uuid5",
         side_effect=point_ids,
     ):
         await service._save_column_info_to_qdrant([column_info])
@@ -339,8 +339,10 @@ async def test_save_metrics_builds_metric_and_column_relationships() -> None:
 
     assert metric_infos == expected_metric_infos
     meta_repository.session.begin.assert_called_once_with()
-    meta_repository.save_metric_infos.assert_called_once_with(expected_metric_infos)
-    meta_repository.save_column_metrics.assert_called_once_with(expected_column_metrics)
+    meta_repository.save_metric_infos.assert_awaited_once_with(expected_metric_infos)
+    meta_repository.save_column_metrics.assert_awaited_once_with(
+        expected_column_metrics
+    )
 
 
 async def test_save_metrics_builds_name_description_and_alias_points() -> None:
@@ -359,7 +361,7 @@ async def test_save_metrics_builds_name_description_and_alias_points() -> None:
     embedding_client.aembed_documents.return_value = embeddings
 
     with patch(
-        "app.services.meta_knowledge_service.uuid.uuid4",
+        "app.services.meta_knowledge_service.uuid.uuid5",
         side_effect=point_ids,
     ):
         await service._save_metrics_to_qdrant([metric_info])

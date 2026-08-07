@@ -14,12 +14,20 @@ Service 只需要说明“需要什么数据”，不需要知道具体 SQL 怎�
 最终 SQL 查询结果是什么。
 """
 
+import asyncio
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.sql_security import validate_read_only_sql
 
 
 class DWMySQLRepository:
     """负责查询 DW MySQL 中的真实表结构和业务数据。"""
+
+    # 即使模型生成了高开销查询，也不能无限占用一次 API 请求。
+    query_timeout_seconds = 30
+    max_result_rows = 1000
 
     def __init__(self, session: AsyncSession):
         """
@@ -189,12 +197,16 @@ class DWMySQLRepository:
         它不会执行完整业务查询，也不返回最终查询数据。
         """
 
-        explain_sql = f"explain {sql}"
+        # EXPLAIN 之前先进行应用层只读检查。DW 数据库账号本身同样只有 SELECT
+        # 权限，两层防护避免把安全完全寄托在提示词上。
+        read_only_sql = validate_read_only_sql(sql)
+        explain_sql = f"explain {read_only_sql}"
 
         # SQL 正确时正常结束。
         # SQL 错误时让数据库异常继续向上抛出，
         # 由后续 Service 或 Agent 决定如何修正 SQL。
-        await self.session.execute(text(explain_sql))
+        async with asyncio.timeout(self.query_timeout_seconds):
+            await self.session.execute(text(explain_sql))
 
     async def run(
         self,
@@ -217,10 +229,17 @@ class DWMySQLRepository:
             ]
         """
 
-        result = await self.session.execute(text(sql))
+        read_only_sql = validate_read_only_sql(sql)
+
+        async with asyncio.timeout(self.query_timeout_seconds):
+            result = await self.session.execute(text(read_only_sql))
 
         # mappings() 把每行转换成带字段名的 RowMapping。
         #
         # dict(row) 再把 SQLAlchemy RowMapping 转换成普通字典，
         # 让 Service、Agent 或 API 层不需要理解 SQLAlchemy 对象。
-        return [dict(row) for row in result.mappings().fetchall()]
+        # fetchmany() 保留 SQL 自身的排序和聚合语义，同时阻止一次响应把任意
+        # 数量的记录加载到 API 内存。需要更多数据时应走分页接口，而不是放宽
+        # Agent 的默认边界。
+        rows = result.mappings().fetchmany(self.max_result_rows)
+        return [dict(row) for row in rows]

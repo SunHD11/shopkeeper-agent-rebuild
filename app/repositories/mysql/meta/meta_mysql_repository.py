@@ -37,32 +37,28 @@ class MetaMySQLRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    def save_table_infos(self, table_infos: list[TableInfo]):
-        """批量保存表元数据。输入仍然是业务实体，而不是 ORM 模型"""
-        self.session.add_all(
-            [TableInfoMapper.to_model(table_info) for table_info in table_infos]
-        )
+    async def save_table_infos(self, table_infos: list[TableInfo]) -> None:
+        """保存或更新表元数据，使知识库构建可以安全重复执行。"""
+        for table_info in table_infos:
+            await self.session.merge(TableInfoMapper.to_model(table_info))
 
-    def save_column_infos(self, column_infos: list[ColumnInfo]):
-        """批量保存字段元数据。实体到模型的转换统一通过 Mapper 完成"""
-        self.session.add_all(
-            [ColumnInfoMapper.to_model(column_info) for column_info in column_infos]
-        )
+    async def save_column_infos(self, column_infos: list[ColumnInfo]) -> None:
+        """保存或更新字段元数据，已有主键会被最新配置覆盖。"""
+        for column_info in column_infos:
+            await self.session.merge(ColumnInfoMapper.to_model(column_info))
 
-    def save_metric_infos(self, metric_infos: list[MetricInfo]):
-        """批量保存指标元数据。指标本身和字段关联关系分开写入"""
-        self.session.add_all(
-            [MetricInfoMapper.to_model(metric_info) for metric_info in metric_infos]
-        )
+    async def save_metric_infos(self, metric_infos: list[MetricInfo]) -> None:
+        """保存或更新指标元数据。指标和字段关系仍由独立方法维护。"""
+        for metric_info in metric_infos:
+            await self.session.merge(MetricInfoMapper.to_model(metric_info))
 
-    def save_column_metrics(self, column_metrics: list[ColumnMetric]):
-        """批量保存字段与指标的关联关系"""
-        self.session.add_all(
-            [
-                ColumnMetricMapper.to_model(column_metric)
-                for column_metric in column_metrics
-            ]
-        )
+    async def save_column_metrics(
+        self,
+        column_metrics: list[ColumnMetric],
+    ) -> None:
+        """保存字段指标关系，重复的联合主键不会再次插入。"""
+        for column_metric in column_metrics:
+            await self.session.merge(ColumnMetricMapper.to_model(column_metric))
 
     async def get_column_info_by_id(self, id: str) -> ColumnInfo | None:
         """按字段 id 查询字段元数据，供召回信息合并阶段补齐字段上下文"""

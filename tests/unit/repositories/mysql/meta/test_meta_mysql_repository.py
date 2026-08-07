@@ -15,8 +15,8 @@ from app.models.table_info import TableInfoMySQL
 from app.repositories.mysql.meta.meta_mysql_repository import MetaMySQLRepository
 
 
-def test_save_table_infos() -> None:
-    """表实体会转换成 TableInfoMySQL 并加入 Session。"""
+async def test_save_table_infos() -> None:
+    """表实体会转换成 TableInfoMySQL 并通过 merge 幂等保存。"""
 
     session = AsyncMock(spec=AsyncSession)
     repository = MetaMySQLRepository(session)
@@ -27,19 +27,18 @@ def test_save_table_infos() -> None:
         description="订单事实表。",
     )
 
-    repository.save_table_infos([table_info])
+    await repository.save_table_infos([table_info])
 
-    models = session.add_all.call_args.args[0]
-    assert len(models) == 1
-    assert isinstance(models[0], TableInfoMySQL)
-    assert models[0].id == "fact_order"
-    assert models[0].name == "fact_order"
-    assert models[0].role == "fact"
-    assert models[0].description == "订单事实表。"
+    model = session.merge.await_args.args[0]
+    assert isinstance(model, TableInfoMySQL)
+    assert model.id == "fact_order"
+    assert model.name == "fact_order"
+    assert model.role == "fact"
+    assert model.description == "订单事实表。"
 
 
-def test_save_column_infos() -> None:
-    """字段实体会转换成 ColumnInfoMySQL 并加入 Session。"""
+async def test_save_column_infos() -> None:
+    """字段实体会转换成 ColumnInfoMySQL 并通过 merge 幂等保存。"""
 
     session = AsyncMock(spec=AsyncSession)
     repository = MetaMySQLRepository(session)
@@ -54,20 +53,19 @@ def test_save_column_infos() -> None:
         table_id="fact_order",
     )
 
-    repository.save_column_infos([column_info])
+    await repository.save_column_infos([column_info])
 
-    models = session.add_all.call_args.args[0]
-    assert len(models) == 1
-    assert isinstance(models[0], ColumnInfoMySQL)
-    assert models[0].id == "fact_order.order_amount"
-    assert models[0].type == "decimal(10,2)"
-    assert models[0].examples == [100.0, 268.0]
-    assert models[0].alias == ["销售额", "收入"]
-    assert models[0].table_id == "fact_order"
+    model = session.merge.await_args.args[0]
+    assert isinstance(model, ColumnInfoMySQL)
+    assert model.id == "fact_order.order_amount"
+    assert model.type == "decimal(10,2)"
+    assert model.examples == [100.0, 268.0]
+    assert model.alias == ["销售额", "收入"]
+    assert model.table_id == "fact_order"
 
 
-def test_save_metric_infos() -> None:
-    """指标实体会转换成 MetricInfoMySQL 并加入 Session。"""
+async def test_save_metric_infos() -> None:
+    """指标实体会转换成 MetricInfoMySQL 并通过 merge 幂等保存。"""
 
     session = AsyncMock(spec=AsyncSession)
     repository = MetaMySQLRepository(session)
@@ -79,19 +77,18 @@ def test_save_metric_infos() -> None:
         alias=["成交总额", "订单总额"],
     )
 
-    repository.save_metric_infos([metric_info])
+    await repository.save_metric_infos([metric_info])
 
-    models = session.add_all.call_args.args[0]
-    assert len(models) == 1
-    assert isinstance(models[0], MetricInfoMySQL)
-    assert models[0].id == "GMV"
-    assert models[0].description == "所有订单的成交金额总和。"
-    assert models[0].relevant_columns == ["fact_order.order_amount"]
-    assert models[0].alias == ["成交总额", "订单总额"]
+    model = session.merge.await_args.args[0]
+    assert isinstance(model, MetricInfoMySQL)
+    assert model.id == "GMV"
+    assert model.description == "所有订单的成交金额总和。"
+    assert model.relevant_columns == ["fact_order.order_amount"]
+    assert model.alias == ["成交总额", "订单总额"]
 
 
-def test_save_column_metrics() -> None:
-    """字段指标关系会转换成 ColumnMetricMySQL 并加入 Session。"""
+async def test_save_column_metrics() -> None:
+    """字段指标关系会转换成 ColumnMetricMySQL 并通过 merge 幂等保存。"""
 
     session = AsyncMock(spec=AsyncSession)
     repository = MetaMySQLRepository(session)
@@ -100,13 +97,12 @@ def test_save_column_metrics() -> None:
         metric_id="GMV",
     )
 
-    repository.save_column_metrics([relationship])
+    await repository.save_column_metrics([relationship])
 
-    models = session.add_all.call_args.args[0]
-    assert len(models) == 1
-    assert isinstance(models[0], ColumnMetricMySQL)
-    assert models[0].column_id == "fact_order.order_amount"
-    assert models[0].metric_id == "GMV"
+    model = session.merge.await_args.args[0]
+    assert isinstance(model, ColumnMetricMySQL)
+    assert model.column_id == "fact_order.order_amount"
+    assert model.metric_id == "GMV"
 
 
 async def test_get_column_info_by_id() -> None:

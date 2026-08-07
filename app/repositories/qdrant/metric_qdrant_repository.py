@@ -53,7 +53,7 @@ class MetricQdrantRepository:
     #
     # 字段元数据使用：column_info_collection
     # 指标元数据使用：metric_info_collection
-    collection_name = "metric_info_collection"
+    collection_name = app_config.qdrant.metric_collection_name
 
     def __init__(
         self,

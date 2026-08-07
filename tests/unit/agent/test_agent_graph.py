@@ -8,20 +8,25 @@ from app.agent.state import DataAgentState
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_node"),
+    ("error", "correction_attempts", "expected_node"),
     [
-        (None, "run_sql"),
-        ("Unknown column 'order_total'", "correct_sql"),
+        (None, 0, "run_sql"),
+        ("Unknown column 'order_total'", 0, "correct_sql"),
+        ("Unknown column 'order_total'", 1, "fail_sql_validation"),
     ],
-    ids=["valid-sql", "invalid-sql"],
+    ids=["valid-sql", "invalid-first-attempt", "invalid-after-correction"],
 )
 def test_route_after_validation_selects_expected_branch(
     error: str | None,
+    correction_attempts: int,
     expected_node: str,
 ) -> None:
     """校验成功直接执行，校验失败进入修正节点。"""
 
-    assert route_after_validation(DataAgentState(error=error)) == expected_node
+    state = DataAgentState(error=error)
+    if correction_attempts:
+        state["sql_correction_attempts"] = correction_attempts
+    assert route_after_validation(state) == expected_node
 
 
 def test_agent_graph_contains_all_nodes() -> None:
@@ -40,6 +45,7 @@ def test_agent_graph_contains_all_nodes() -> None:
         "generate_sql",
         "validate_sql",
         "correct_sql",
+        "fail_sql_validation",
         "run_sql",
         END,
     }
@@ -67,7 +73,9 @@ def test_agent_graph_has_complete_execution_edges() -> None:
         ("generate_sql", "validate_sql"),
         ("validate_sql", "run_sql"),
         ("validate_sql", "correct_sql"),
-        ("correct_sql", "run_sql"),
+        ("correct_sql", "validate_sql"),
+        ("validate_sql", "fail_sql_validation"),
+        ("fail_sql_validation", END),
         ("run_sql", END),
     }
 

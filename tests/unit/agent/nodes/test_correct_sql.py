@@ -92,7 +92,10 @@ async def test_correct_sql_passes_error_and_context_and_returns_trimmed_sql(
         "SQL=SELECT SUM(order_total) AS GMV FROM fact_order\n"
         "ERROR=Unknown column 'order_total'"
     ]
-    assert result == {"sql": "SELECT SUM(order_amount) AS GMV FROM fact_order;"}
+    assert result == {
+        "sql": "SELECT SUM(order_amount) AS GMV FROM fact_order;",
+        "sql_correction_attempts": 1,
+    }
     assert writer.call_args_list == [
         call({"type": "progress", "step": "校正SQL", "status": "running"}),
         call({"type": "progress", "step": "校正SQL", "status": "success"}),

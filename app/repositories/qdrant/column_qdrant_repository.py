@@ -57,7 +57,7 @@ class ColumnQdrantRepository:
     # metric_info_collection
     #
     # 字段和指标分开存储，可以避免搜索结果类型混杂。
-    collection_name = "column_info_collection"
+    collection_name = app_config.qdrant.column_collection_name
 
     def __init__(
         self,

@@ -33,6 +33,7 @@ from app.agent.context import DataAgentContext
 from app.agent.nodes.add_extra_context import add_extra_context
 from app.agent.nodes.correct_sql import correct_sql
 from app.agent.nodes.extract_keywords import extract_keywords
+from app.agent.nodes.fail_sql_validation import fail_sql_validation
 from app.agent.nodes.filter_metric import filter_metric
 from app.agent.nodes.filter_table import filter_table
 from app.agent.nodes.generate_sql import generate_sql
@@ -59,7 +60,7 @@ from app.repositories.qdrant.metric_qdrant_repository import MetricQdrantReposit
 
 def route_after_validation(
     state: DataAgentState,
-) -> Literal["run_sql", "correct_sql"]:
+) -> Literal["run_sql", "correct_sql", "fail_sql_validation"]:
     """根据 validate_sql 写入的 error 决定下一节点。
 
     - ``error is None``：数据库 EXPLAIN 校验通过，直接执行；
@@ -68,7 +69,13 @@ def route_after_validation(
     单独定义路由函数而不是使用匿名 lambda，便于阅读和单元测试。
     """
 
-    return "run_sql" if state["error"] is None else "correct_sql"
+    if state["error"] is None:
+        return "run_sql"
+
+    if state.get("sql_correction_attempts", 0) >= 1:
+        return "fail_sql_validation"
+
+    return "correct_sql"
 
 
 # StateGraph 声明图中所有节点共享的动态 State，以及运行时依赖 Context。
@@ -95,6 +102,7 @@ graph_builder.add_node("add_extra_context", add_extra_context)
 graph_builder.add_node("generate_sql", generate_sql)
 graph_builder.add_node("validate_sql", validate_sql)
 graph_builder.add_node("correct_sql", correct_sql)
+graph_builder.add_node("fail_sql_validation", fail_sql_validation)
 graph_builder.add_node("run_sql", run_sql)
 
 # ---------------------------------------------------------------------------
@@ -165,12 +173,14 @@ graph_builder.add_conditional_edges(
     path_map={
         "run_sql": "run_sql",
         "correct_sql": "correct_sql",
+        "fail_sql_validation": "fail_sql_validation",
     },
 )
 
-# 校验失败时，correct_sql 使用数据库错误进行一次最小修正，再执行结果。
-# 这里忠实沿用原项目流程：修正后的 SQL 直接进入 run_sql，没有再次循环校验。
-graph_builder.add_edge("correct_sql", "run_sql")
+# 校验失败时只允许进行一次自动修正。修正后的 SQL 必须重新经过相同的只读
+# 安全检查和数据库 EXPLAIN；第二次仍失败则进入 fail_sql_validation 明确终止。
+graph_builder.add_edge("correct_sql", "validate_sql")
+graph_builder.add_edge("fail_sql_validation", END)
 
 # run_sql 通过 stream_writer 输出最终 result 事件，随后任务结束。
 graph_builder.add_edge("run_sql", END)
