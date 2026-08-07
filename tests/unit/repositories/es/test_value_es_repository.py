@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 from elasticsearch import AsyncElasticsearch
 
+from app.conf.app_config import app_config
 from app.entities.value_info import ValueInfo
 from app.repositories.es.value_es_repository import ValueESRepository
 
@@ -17,6 +18,29 @@ def create_es_client() -> Mock:
     client.bulk = AsyncMock()
     client.search = AsyncMock()
     return client
+
+
+def test_repository_uses_rebuild_index_name_by_default() -> None:
+    """未显式传入索引名时，应使用 rebuild 配置中的独立索引。"""
+
+    repository = ValueESRepository(create_es_client())
+
+    # 这条断言同时保护两层契约：
+    # 1. Repository 必须从 AppConfig 读取索引名称；
+    # 2. rebuild 的 YAML 必须继续使用带 _rebuild 后缀的隔离索引。
+    assert repository.index_name == app_config.es.index_name
+    assert repository.index_name == "value_index_rebuild"
+
+
+def test_repository_allows_explicit_index_name_override() -> None:
+    """测试或其他隔离环境可以通过构造参数覆盖默认索引名称。"""
+
+    repository = ValueESRepository(
+        create_es_client(),
+        index_name="value_index_test",
+    )
+
+    assert repository.index_name == "value_index_test"
 
 
 async def test_ensure_index_skips_creation_when_index_exists() -> None:

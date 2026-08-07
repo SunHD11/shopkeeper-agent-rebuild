@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from omegaconf.errors import InterpolationResolutionError
 
-from app.conf.app_config import app_config, load_app_config
+from app.conf.app_config import PROJECT_ROOT, app_config, load_app_config
 
 
 def test_current_config_uses_rebuild_service_boundaries() -> None:
@@ -37,7 +37,9 @@ def test_missing_environment_variable_fails_fast(
 ) -> None:
     variable = "SHOPKEEPER_REBUILD_TEST_MISSING"
     monkeypatch.delenv(variable, raising=False)
-    source = Path(__file__).resolve().parents[2] / "conf" / "app_config.yaml"
+    # 测试文件已经按模块移动到 tests/unit/conf，不能再依赖固定 parents 层数
+    # 推算项目根目录；直接复用生产配置模块的稳定 PROJECT_ROOT。
+    source = PROJECT_ROOT / "conf" / "app_config.yaml"
     config_text = source.read_text(encoding="utf-8").replace(
         "${oc.env:MYSQL_PASSWORD}", f"${{oc.env:{variable}}}"
     )

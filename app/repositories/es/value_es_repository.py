@@ -37,6 +37,10 @@ from dataclasses import asdict
 # 所以这里使用异步客户端，后面的方法也都使用 async/await。
 from elasticsearch import AsyncElasticsearch
 
+# app_config.es.index_name 保存当前项目应该使用的 Elasticsearch 索引名称。
+# rebuild 配置为 value_index_rebuild，从而与原项目的 value_index 相互隔离。
+from app.conf.app_config import app_config
+
 # ValueInfo 是项目内部表示“字段真实取值”的业务实体。
 #
 # Repository 对外接收和返回 ValueInfo，
@@ -54,12 +58,6 @@ class ValueESRepository:
     “黄金会员”属于 dim_customer.level_name
     “已支付”属于 fact_order.order_status
     """
-
-    # 所有字段真实值统一保存到这个索引中。
-    #
-    # Elasticsearch 中的索引可以理解为：
-    # 一组结构相似的文档集合。
-    index_name = "value_index"
 
     # 定义 Elasticsearch 索引中每个字段的类型。
     #
@@ -112,6 +110,7 @@ class ValueESRepository:
     def __init__(
         self,
         client: AsyncElasticsearch,
+        index_name: str | None = None,
     ):
         """
         接收外部创建好的 Elasticsearch 异步客户端。
@@ -119,6 +118,13 @@ class ValueESRepository:
         参数：
             client：
                 已经初始化的 AsyncElasticsearch。
+
+            index_name：
+                当前 Repository 操作的 Elasticsearch 索引名称。
+
+                没有显式传入时，默认读取 app_config.es.index_name；
+                rebuild 因此使用 value_index_rebuild，不会误读写原项目的
+                value_index。测试或其他隔离环境仍然可以传入自定义名称。
 
         Repository 不负责创建和关闭 Client，
         它只使用传入的 Client 操作 Elasticsearch。
@@ -130,9 +136,18 @@ class ValueESRepository:
         # 都通过 self.client 使用同一个 Elasticsearch 客户端。
         self.client = client
 
+        # 不能继续把 value_index 硬编码成类属性，否则原项目和 rebuild 即使连接
+        # 不同端口，也可能在配置调整或共享 ES 时访问同名索引。
+        #
+        # `is not None` 而不是 `or`，可以让空字符串等非法值继续暴露给 ES，
+        # 避免 Repository 悄悄替调用方改回默认值，掩盖上游配置错误。
+        self.index_name = (
+            index_name if index_name is not None else app_config.es.index_name
+        )
+
     async def ensure_index(self):
         """
-        确保 value_index 索引存在。
+        确保当前项目配置的字段值索引存在。
 
         如果索引已经存在：
             不执行创建操作。
