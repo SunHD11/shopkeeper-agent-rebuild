@@ -46,4 +46,5 @@ pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
   "integration: requires the local Docker services",
+  "live_llm: requires a paid external LLM request and RUN_LIVE_LLM_TESTS=1",
 ]

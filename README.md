@@ -51,6 +51,17 @@ Swagger 位于 `http://127.0.0.1:8000/docs`。真实问数请求会访问配置�
 LLM；密钥无效时返回 401，账户余额不足时返回 402，这两类错误都会被转换为
 最后一条 SSE `type=error` 事件。
 
+完成知识库构建后，可以显式启用付费的真实端到端测试：
+
+```powershell
+$env:RUN_LIVE_LLM_TESTS = "1"
+uv run pytest tests/integration/api/test_query_e2e.py -v
+Remove-Item Env:RUN_LIVE_LLM_TESTS
+```
+
+该测试会真实调用 DeepSeek，并验证 HTTP、SSE、LangGraph、三类检索系统和
+DW MySQL 最终共同返回预期结果；默认不启用，避免普通测试意外产生模型费用。
+
 ## 完全独立服务模式
 
 `shopkeeper-agent-rebuild` 默认启动并管理自己的全部基础服务，不再共享原项目容器：
