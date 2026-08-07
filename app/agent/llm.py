@@ -27,16 +27,16 @@ llm = init_chat_model(
     # 模型名称来自 conf/app_config.yaml：
     #
     #     llm:
-    #       model_name: Pro/zai-org/GLM-5.1
+    #       model_name: deepseek-v4-pro
     #
     # 将模型选择留在配置层，切换模型时不需要修改字段召回或 SQL 节点代码。
     model=app_config.llm.model_name,
-    # 当前配置的硅基流动服务提供 OpenAI 兼容接口，因此使用 openai provider。
-    # 这里描述的是通信协议/适配器，不代表模型本身一定由 OpenAI 提供。
+    # DeepSeek 官方 API 提供 OpenAI Chat Completions 兼容接口，因此继续使用
+    # openai provider。这里描述的是通信协议/适配器，并不代表模型来自 OpenAI。
     model_provider="openai",
     # OpenAI 兼容服务的 API 根地址，例如：
     #
-    #     https://api.siliconflow.cn/v1
+    #     https://api.deepseek.com
     #
     # LangChain 会在这个地址之上调用对应的 Chat Completions 接口。
     base_url=app_config.llm.base_url,
@@ -55,6 +55,17 @@ llm = init_chat_model(
     #
     # 因此按原项目设置为 0，减少无关发散和相同输入下的随机差异。
     temperature=0,
+    # DeepSeek V4 默认开启思考模式，但当前 Agent 的多个节点要求快速返回严格
+    # JSON 数组、JSON 对象或一条纯 SQL。统一关闭思考模式可以降低延迟和费用，
+    # 同时让上面的 temperature=0 真正生效。
+    #
+    # 以后若要提高复杂 SQL 推理能力，更合适的做法是给 generate_sql 和
+    # correct_sql 单独注入思考模型，而不是让三路关键词扩展也进行深度思考。
+    extra_body={
+        "thinking": {
+            "type": "disabled",
+        }
+    },
 )
 
 

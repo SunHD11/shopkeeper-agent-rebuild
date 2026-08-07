@@ -82,6 +82,13 @@ def test_llm_uses_the_original_project_model_configuration(
         # 关键词扩展、JSON 过滤和 SQL 生成都要求稳定输出，
         # 因此按原项目关闭随机发散。
         temperature=0,
+        # DeepSeek V4 默认开启思考模式；当前共享模型先统一使用非思考模式，
+        # 保证严格结构输出和较低调用延迟。
+        extra_body={
+            "thinking": {
+                "type": "disabled",
+            }
+        },
     )
 
 
