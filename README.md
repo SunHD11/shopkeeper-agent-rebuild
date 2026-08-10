@@ -74,6 +74,21 @@ Invoke-RestMethod http://127.0.0.1:8000/health/live
 Invoke-RestMethod http://127.0.0.1:8000/health/ready
 ```
 
+## 启动在线问数前端
+
+项目已提供独立的 React + TypeScript 前端，负责消费 `/api/query` 的 SSE 事件、
+展示五阶段执行进度、结构化错误、查询结果和基础服务健康状态：
+
+```powershell
+cd frontend
+pnpm install
+pnpm dev
+```
+
+浏览器访问 `http://127.0.0.1:5173`。开发服务器默认把 `/api` 和 `/health`
+代理到 `http://127.0.0.1:8000`，因此本地开发不需要额外处理跨域。前端架构、
+环境变量与测试命令见 `frontend/README.md`，视觉系统见根目录 `DESIGN.md`。
+
 `live` 只检查 FastAPI 进程；`ready` 并行检查 Meta MySQL、DW MySQL、Qdrant、
 Elasticsearch 和本地 Embedding，任一不可用即返回 503。它不会调用 DeepSeek，
 因此不会产生模型费用，也不会因外部模型短暂限流让本地容器被错误重启。

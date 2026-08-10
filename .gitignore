@@ -21,3 +21,11 @@ Thumbs.db
 
 # Large local TEI model files
 docker/embedding/
+
+# Frontend generated files
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/*.tsbuildinfo
