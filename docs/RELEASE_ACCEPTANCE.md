@@ -30,6 +30,7 @@ Embedding 模型自动下载与缓存、知识库初始化、FastAPI、React/Ngi
 | 健康检查 | 通过 | API live/ready、Frontend health、Frontend→API proxy 全部通过 |
 | 真实付费 E2E | 通过 | DeepSeek + 检索 + Graph + DW 返回 `[{"销售总额": 107373.0}]` |
 | 部署入口真实 SSE | 通过 | 经 `:5173/api/query` 逐步收到进度事件和最终 DW 结果 |
+| GitHub Actions | 通过 | Backend、Frontend、Playwright、Compose 和两个镜像构建全部通过 |
 
 ## 关键验收命令
 
@@ -55,5 +56,5 @@ powershell -ExecutionPolicy Bypass -File scripts/stop_full_stack.ps1
 ## 已知非阻塞事项
 
 - FastAPI TestClient 当前出现一条来自 Starlette 的 `httpx` 迁移弃用警告；不影响运行和测试结果。
-- GitHub Actions 配置已完成本地语法、Compose 和镜像构建验证；远端工作流结果需要推送后由 GitHub 执行。
+- GitHub Actions 首次远端验收已通过，运行编号为 `31351061117`。
 - 正式发布标签和主分支合并应当在远端 CI 全绿后进行，不由本机验收提前冒充完成。
