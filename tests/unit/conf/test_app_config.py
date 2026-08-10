@@ -34,6 +34,35 @@ def test_config_loading_does_not_depend_on_current_directory(
     assert loaded.db_meta.database == "meta"
 
 
+def test_service_addresses_can_be_overridden_for_compose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一份 YAML 在容器内可以改用 Compose 服务名和内部端口。"""
+
+    overrides = {
+        "META_MYSQL_HOST": "mysql",
+        "META_MYSQL_PORT": "3306",
+        "DW_MYSQL_HOST": "mysql",
+        "DW_MYSQL_PORT": "3306",
+        "QDRANT_HOST": "qdrant",
+        "QDRANT_PORT": "6333",
+        "ELASTICSEARCH_HOST": "elasticsearch",
+        "ELASTICSEARCH_PORT": "9200",
+        "EMBEDDING_HOST": "embedding",
+        "EMBEDDING_PORT": "80",
+    }
+    for name, value in overrides.items():
+        monkeypatch.setenv(name, value)
+
+    loaded = load_app_config(env_file=None)
+
+    assert (loaded.db_meta.host, loaded.db_meta.port) == ("mysql", 3306)
+    assert (loaded.db_dw.host, loaded.db_dw.port) == ("mysql", 3306)
+    assert (loaded.qdrant.host, loaded.qdrant.port) == ("qdrant", 6333)
+    assert (loaded.es.host, loaded.es.port) == ("elasticsearch", 9200)
+    assert (loaded.embedding.host, loaded.embedding.port) == ("embedding", 80)
+
+
 def test_secret_fields_are_not_in_repr() -> None:
     rendered = repr(app_config)
     assert app_config.db_meta.password not in rendered

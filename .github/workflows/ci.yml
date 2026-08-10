@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend quality
+    runs-on: ubuntu-latest
+    env:
+      MYSQL_PASSWORD: ci-mysql-password
+      LLM_API_KEY: ci-placeholder-not-used
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: 0.11.32
+          enable-cache: true
+      - name: Install Python and locked dependencies
+        run: |
+          uv python install 3.13
+          uv sync --locked
+      - name: Check lock file
+        run: uv lock --check
+      - name: Lint
+        run: uv run ruff check .
+      - name: Unit tests
+        run: uv run pytest tests/unit -q
+
+  frontend:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Type check
+        run: pnpm lint
+      - name: Unit tests
+        run: pnpm test
+      - name: Production build
+        run: pnpm build
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Browser tests
+        run: pnpm e2e
+
+  containers:
+    name: Container manifests and images
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Prepare non-secret CI environment
+        run: cp .env.example .env
+      - name: Validate Compose
+        run: docker compose --env-file .env -f docker/docker-compose.yaml config --quiet
+      - name: Build application images
+        run: docker compose --env-file .env -f docker/docker-compose.yaml build api frontend

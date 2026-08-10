@@ -134,6 +134,61 @@ DW MySQL 最终共同返回预期结果；默认不启用，避免普通测试�
 - Qdrant：`column_info_collection_rebuild`、`metric_info_collection_rebuild`
 - Elasticsearch：`value_index_rebuild`
 
+## 一键启动完整应用（推荐）
+
+新机器只需要 Git、Docker Desktop 和 Docker Compose。先创建本地环境文件并把
+三个密码以及 DeepSeek Key 替换为真实值：
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+随后从项目根目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start_full_stack.ps1
+```
+
+脚本会依次校验环境、构建 API/前端镜像、启动七个服务、等待中文 Embedding
+模型就绪、幂等构建元数据知识库并执行完整冒烟检查。首次启动需要从 Hugging
+Face 下载模型，耗时取决于网络；模型存入 Docker 命名卷，后续不会重复下载。
+
+完成后访问：
+
+- 问数前端：`http://127.0.0.1:5173`
+- FastAPI 文档：`http://127.0.0.1:8000/docs`
+- API readiness：`http://127.0.0.1:8000/health/ready`
+
+如果宿主机的 `8000` 已被其他程序占用，可以只覆盖宿主机端口：
+
+```powershell
+$env:API_HOST_PORT = "8001"
+powershell -ExecutionPolicy Bypass -File scripts/start_full_stack.ps1
+```
+
+此时 API 文档和 readiness 分别改为 `http://127.0.0.1:8001/docs` 与
+`http://127.0.0.1:8001/health/ready`，容器内部连接无需修改。
+
+常用运维命令：
+
+```powershell
+# 跳过镜像重建，但仍等待服务、构建知识库并冒烟验证
+powershell -ExecutionPolicy Bypass -File scripts/start_full_stack.ps1 -SkipBuild
+
+# 单独重复构建知识库
+powershell -ExecutionPolicy Bypass -File scripts/build_knowledge.ps1
+
+# 单独执行完整栈冒烟检查
+powershell -ExecutionPolicy Bypass -File scripts/smoke_full_stack.ps1
+
+# 停止容器但保留全部数据库、向量、索引和模型卷
+powershell -ExecutionPolicy Bypass -File scripts/stop_full_stack.ps1
+```
+
+完整交付标准与故障模式见 `docs/RELEASE_DELIVERY_PLAN.md`，本阶段的实际命令、
+测试数量和真实查询结果见 `docs/RELEASE_ACCEPTANCE.md`。
+
 ## 1. 安装 Python 依赖
 
 ```powershell
