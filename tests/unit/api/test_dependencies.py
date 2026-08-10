@@ -3,6 +3,8 @@
 from unittest.mock import Mock
 
 import app.api.dependencies as dependencies_module
+from app.core.errors import AppError, ErrorCode
+from app.core.query_limiter import QueryLimiter
 from app.repositories.es.value_es_repository import ValueESRepository
 from app.repositories.mysql.dw.dw_mysql_repository import DWMySQLRepository
 from app.repositories.mysql.meta.meta_mysql_repository import MetaMySQLRepository
@@ -147,3 +149,39 @@ async def test_query_service_dependency_preserves_all_objects() -> None:
     assert isinstance(service, QueryService)
     for attribute_name, expected_object in objects.items():
         assert getattr(service, attribute_name) is expected_object
+
+
+async def test_query_limiter_dependency_holds_slot_until_response_finishes(
+    monkeypatch,
+) -> None:
+    """yield 依赖覆盖完整 SSE 生命周期，并在退出时释放槽位。"""
+
+    limiter = QueryLimiter(limit=1)
+    monkeypatch.setattr(dependencies_module, "query_limiter", limiter)
+    dependency = dependencies_module.get_query_limiter()
+
+    yielded_limiter = await anext(dependency)
+
+    assert yielded_limiter is limiter
+    assert limiter.active == 1
+
+    await dependency.aclose()
+    assert limiter.active == 0
+
+
+async def test_query_limiter_dependency_rejects_full_capacity(monkeypatch) -> None:
+    limiter = QueryLimiter(limit=1)
+    await limiter.try_acquire()
+    monkeypatch.setattr(dependencies_module, "query_limiter", limiter)
+    dependency = dependencies_module.get_query_limiter()
+
+    try:
+        await anext(dependency)
+    except AppError as error:
+        assert error.code == ErrorCode.TOO_MANY_REQUESTS
+        assert error.status_code == 429
+    else:
+        raise AssertionError("满载时必须拒绝新问数请求")
+
+    assert limiter.active == 1
+    await limiter.release()

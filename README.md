@@ -23,6 +23,9 @@ LangGraph 编排、FastAPI SSE 接口，以及真实基础服务集成验证。
 - 字段真实值 `-> Elasticsearch` 的全文检索链路；
 - 三路召回、元数据合并、过滤、SQL 生成、校验、修正和执行的 Agent Graph；
 - `POST /api/query -> QueryService -> LangGraph -> SSE` 的在线接口；
+- `/health/live` 进程存活检查与 `/health/ready` 五项基础服务就绪检查；
+- 统一公开错误码、request ID、120 秒总超时和客户端断连取消传播；
+- 最多 4 条并发问数、DeepSeek 单次请求超时/一次重试与前端 CORS 白名单；
 - Meta MySQL 幂等更新、Qdrant 稳定 Point ID 和 rebuild 专属 Collection；
 - SQL 应用层只读检查、30 秒超时、最多 1000 行结果，以及修正后重新校验。
 
@@ -48,8 +51,45 @@ uv run fastapi dev main.py
 ```
 
 Swagger 位于 `http://127.0.0.1:8000/docs`。真实问数请求会访问配置中的外部
-LLM；密钥无效时返回 401，账户余额不足时返回 402，这两类错误都会被转换为
-最后一条 SSE `type=error` 事件。
+LLM。流式响应开始后的失败会被转换为最后一条结构化 SSE 事件，例如：
+
+```json
+{
+  "type": "error",
+  "code": "LLM_UNAVAILABLE",
+  "message": "大模型服务暂时不可用，请稍后重试",
+  "request_id": "8e71...",
+  "retryable": true
+}
+```
+
+服务端日志保留原始异常，前端只收到安全文案；可以使用响应头或错误事件中的
+`request_id` 定位同一次 LangGraph 链路。超过并发上限的请求会在 SSE 开始前
+直接返回 HTTP 429，不进入 Agent，也不会创建请求级 MySQL Session 或执行 SQL。
+
+健康检查：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health/live
+Invoke-RestMethod http://127.0.0.1:8000/health/ready
+```
+
+`live` 只检查 FastAPI 进程；`ready` 并行检查 Meta MySQL、DW MySQL、Qdrant、
+Elasticsearch 和本地 Embedding，任一不可用即返回 503。它不会调用 DeepSeek，
+因此不会产生模型费用，也不会因外部模型短暂限流让本地容器被错误重启。
+
+在线运行边界集中位于 `conf/app_config.yaml`：
+
+```yaml
+runtime:
+  query_timeout_seconds: 120
+  retrieval_timeout_seconds: 20
+  health_timeout_seconds: 5
+  max_concurrent_queries: 4
+```
+
+DeepSeek 的 `timeout_seconds` 和 `max_retries` 只作用于模型网络请求；最终 SQL
+不会自动重试，避免未来引入非确定性数据库操作时发生重复执行。
 
 完成知识库构建后，可以显式启用付费的真实端到端测试：
 

@@ -1,5 +1,6 @@
 """测试 QueryService 对 LangGraph 事件流和 SSE 的编排。"""
 
+import asyncio
 import json
 from datetime import date
 from decimal import Decimal
@@ -23,7 +24,8 @@ def create_service() -> tuple[QueryService, dict[str, Mock]]:
         "metric_qdrant_repository": Mock(name="metric_qdrant_repository"),
         "value_es_repository": Mock(name="value_es_repository"),
     }
-    return QueryService(**dependencies), dependencies
+    runtime_config = SimpleNamespace(query_timeout_seconds=120)
+    return QueryService(**dependencies, runtime_config=runtime_config), dependencies
 
 
 def decode_sse_event(message: str) -> dict:
@@ -120,11 +122,23 @@ async def test_query_converts_graph_error_to_final_sse_event(
     )
 
     service, _ = create_service()
-    messages = [message async for message in service.query("查询销售额")]
+    messages = [
+        message
+        async for message in service.query(
+            "查询销售额",
+            request_id="test-request",
+        )
+    ]
 
     assert [decode_sse_event(message) for message in messages] == [
         {"type": "progress", "step": "生成SQL", "status": "running"},
-        {"type": "error", "message": "llm unavailable"},
+        {
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "message": "查询处理失败，请携带 request_id 联系服务管理员",
+            "request_id": "test-request",
+            "retryable": False,
+        },
     ]
 
 
@@ -140,6 +154,78 @@ async def test_query_rejects_blank_question_without_starting_graph(
     messages = [message async for message in service.query(" \n ")]
 
     assert [decode_sse_event(message) for message in messages] == [
-        {"type": "error", "message": "用户问题不能为空"}
+        {
+            "type": "error",
+            "code": "INVALID_REQUEST",
+            "message": "用户问题不能为空",
+            "request_id": "system",
+            "retryable": False,
+        }
     ]
     graph.astream.assert_not_called()
+
+
+async def test_query_converts_total_timeout_to_retryable_sse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Graph 超过总时限后被取消，并返回稳定的 QUERY_TIMEOUT。"""
+
+    async def slow_astream(**_):
+        await asyncio.sleep(1)
+        yield {"type": "result", "data": []}
+
+    monkeypatch.setattr(
+        query_service_module,
+        "graph",
+        SimpleNamespace(astream=slow_astream),
+    )
+    service, _ = create_service()
+    service.runtime_config.query_timeout_seconds = 0.001
+
+    messages = [
+        message
+        async for message in service.query(
+            "查询销售额",
+            request_id="timeout-request",
+        )
+    ]
+
+    assert [decode_sse_event(message) for message in messages] == [
+        {
+            "type": "error",
+            "code": "QUERY_TIMEOUT",
+            "message": "查询处理超时，请缩小查询范围后重试",
+            "request_id": "timeout-request",
+            "retryable": True,
+        }
+    ]
+
+
+async def test_query_propagates_client_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """客户端断连的 CancelledError 不能被误包装成普通 SSE error。"""
+
+    graph_started = asyncio.Event()
+
+    async def waiting_astream(**_):
+        graph_started.set()
+        await asyncio.Event().wait()
+        yield {"type": "result", "data": []}
+
+    monkeypatch.setattr(
+        query_service_module,
+        "graph",
+        SimpleNamespace(astream=waiting_astream),
+    )
+    service, _ = create_service()
+    iterator = service.query("查询销售额")
+    next_event_task = asyncio.create_task(anext(iterator))
+    await graph_started.wait()
+
+    next_event_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await next_event_task
+
+    await iterator.aclose()

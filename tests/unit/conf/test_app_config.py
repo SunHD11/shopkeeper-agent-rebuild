@@ -16,6 +16,14 @@ def test_current_config_uses_rebuild_service_boundaries() -> None:
     assert app_config.qdrant.column_collection_name.endswith("_rebuild")
     assert app_config.qdrant.metric_collection_name.endswith("_rebuild")
     assert app_config.es.index_name == "value_index_rebuild"
+    assert app_config.runtime.query_timeout_seconds == 120
+    assert app_config.runtime.max_concurrent_queries == 4
+    assert app_config.llm.timeout_seconds == 60
+    assert app_config.llm.max_retries == 1
+    assert app_config.api.cors_allowed_origins == [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
 
 def test_config_loading_does_not_depend_on_current_directory(

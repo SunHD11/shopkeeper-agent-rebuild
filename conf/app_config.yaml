@@ -49,3 +49,19 @@ llm:
   model_name: deepseek-v4-pro
   api_key: ${oc.env:LLM_API_KEY}
   base_url: https://api.deepseek.com
+  timeout_seconds: 60
+  max_retries: 1
+
+# 在线请求的生产保护边界。总超时覆盖整条 LangGraph；检索超时只约束
+# 单次 Embedding/Qdrant/Elasticsearch 操作；健康检查不会调用付费 LLM。
+runtime:
+  query_timeout_seconds: 120
+  retrieval_timeout_seconds: 20
+  health_timeout_seconds: 5
+  max_concurrent_queries: 4
+
+api:
+  # 仅允许本地 Vite 前端跨域访问。开启 credentials 时不能使用通配符 *。
+  cors_allowed_origins:
+    - http://localhost:5173
+    - http://127.0.0.1:5173

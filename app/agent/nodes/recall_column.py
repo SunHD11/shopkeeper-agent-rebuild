@@ -16,6 +16,8 @@
 merge_retrieved_info 补齐表关系，再由 filter_table 做最终裁剪。
 """
 
+import asyncio
+
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import PromptTemplate
 from langgraph.runtime import Runtime
@@ -23,6 +25,7 @@ from langgraph.runtime import Runtime
 from app.agent.context import DataAgentContext
 from app.agent.llm import llm
 from app.agent.state import DataAgentState
+from app.conf.app_config import app_config
 from app.core.log import logger
 from app.entities.column_info import ColumnInfo
 from app.prompt.prompt_loader import load_prompt
@@ -81,13 +84,14 @@ async def recall_column(
         for keyword in all_keywords:
             # Qdrant 执行向量相似度搜索，因此每个文本关键词要先使用与离线构建
             # 相同的 Embedding 模型转换成相同维度的查询向量。
-            embedding = await embedding_client.aembed_query(keyword)
+            async with asyncio.timeout(app_config.runtime.retrieval_timeout_seconds):
+                embedding = await embedding_client.aembed_query(keyword)
 
-            # Repository 封装 Collection 名称、阈值、查询参数和 Payload 转实体；
-            # 节点只表达“使用这个向量搜索字段”的业务意图。
-            current_column_infos: list[
-                ColumnInfo
-            ] = await column_qdrant_repository.search(embedding)
+                # Repository 封装 Collection 名称、阈值、查询参数和 Payload 转实体；
+                # 节点只表达“使用这个向量搜索字段”的业务意图。
+                current_column_infos: list[
+                    ColumnInfo
+                ] = await column_qdrant_repository.search(embedding)
 
             for column_info in current_column_infos:
                 if column_info.id not in column_info_map:

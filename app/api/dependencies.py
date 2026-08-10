@@ -31,12 +31,19 @@ from app.clients.mysql_client_manager import (
     meta_mysql_client_manager,
 )
 from app.clients.qdrant_client_manager import qdrant_client_manager
+from app.conf.app_config import app_config
+from app.core.errors import AppError, ErrorCode
+from app.core.query_limiter import QueryLimiter
 from app.repositories.es.value_es_repository import ValueESRepository
 from app.repositories.mysql.dw.dw_mysql_repository import DWMySQLRepository
 from app.repositories.mysql.meta.meta_mysql_repository import MetaMySQLRepository
 from app.repositories.qdrant.column_qdrant_repository import ColumnQdrantRepository
 from app.repositories.qdrant.metric_qdrant_repository import MetricQdrantRepository
+from app.services.health_service import HealthService
 from app.services.query_service import QueryService
+
+# 单进程共享同一个计数器，限制的是正在运行的完整 LangGraph 数量。
+query_limiter = QueryLimiter(app_config.runtime.max_concurrent_queries)
 
 
 async def get_meta_session() -> AsyncIterator[AsyncSession]:
@@ -138,3 +145,35 @@ async def get_query_service(
         metric_qdrant_repository=metric_qdrant_repository,
         value_es_repository=value_es_repository,
     )
+
+
+async def get_health_service() -> HealthService:
+    """组装只读的应用级 readiness 探测服务。"""
+
+    return HealthService(
+        meta_mysql_manager=meta_mysql_client_manager,
+        dw_mysql_manager=dw_mysql_client_manager,
+        qdrant_manager=qdrant_client_manager,
+        es_manager=es_client_manager,
+        embedding_manager=embedding_client_manager,
+        timeout_seconds=app_config.runtime.health_timeout_seconds,
+    )
+
+
+async def get_query_limiter() -> AsyncIterator[QueryLimiter]:
+    """在创建数据库 Session 前抢占槽位，并在整个流式响应结束后释放。"""
+
+    if not await query_limiter.try_acquire():
+        raise AppError(
+            ErrorCode.TOO_MANY_REQUESTS,
+            "当前问数请求较多，请稍后重试",
+            retryable=True,
+            status_code=429,
+        )
+
+    try:
+        # FastAPI 的 yield 依赖会覆盖完整响应生命周期。SSE 正常结束、中途异常
+        # 或客户端断连后都会进入 finally，不会泄漏并发槽位。
+        yield query_limiter
+    finally:
+        await query_limiter.release()

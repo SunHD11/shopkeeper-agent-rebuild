@@ -13,9 +13,13 @@ Shopkeeper Agent rebuild 的 FastAPI 应用入口。
 import uuid
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.exception_handlers import register_exception_handlers
 from app.api.lifespan import lifespan
+from app.api.routers.health_router import health_router
 from app.api.routers.query_router import query_router
+from app.conf.app_config import app_config
 from app.core.context import request_id_ctx_var
 
 # lifespan 统一管理 Qdrant、Embedding、Elasticsearch 和两个 MySQL Engine。
@@ -27,8 +31,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 浏览器前端和 API 开发端口不同，必须显式允许本地 Vite Origin；使用配置白名单
+# 而非通配符，避免未来携带认证 Cookie 时产生不安全的跨域行为。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=app_config.api.cors_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
+)
+
 # 如果没有 include_router，即使 Router 函数已经编写，FastAPI 也不会注册路径。
 app.include_router(query_router)
+app.include_router(health_router)
+register_exception_handlers(app)
 
 
 @app.middleware("http")

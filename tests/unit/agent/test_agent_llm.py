@@ -41,6 +41,8 @@ def mocked_llm_module(
             model_name="test-chat-model",
             base_url="https://llm.example.test/v1",
             api_key="test-api-key",
+            timeout_seconds=45,
+            max_retries=1,
         )
     )
     fake_config_module = ModuleType(config_module_name)
@@ -79,6 +81,8 @@ def test_llm_uses_the_original_project_model_configuration(
         model_provider="openai",
         base_url=fake_app_config.llm.base_url,
         api_key=fake_app_config.llm.api_key,
+        timeout=fake_app_config.llm.timeout_seconds,
+        max_retries=fake_app_config.llm.max_retries,
         # 关键词扩展、JSON 过滤和 SQL 生成都要求稳定输出，
         # 因此按原项目关闭随机发散。
         temperature=0,

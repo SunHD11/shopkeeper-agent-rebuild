@@ -55,6 +55,13 @@ class MySQLClientManager:
             raise RuntimeError("MySQLClientManager.init() must be called first")
         return self.session_factory
 
+    def require_engine(self) -> AsyncEngine:
+        """返回已初始化 Engine，供 readiness 等应用级探测复用。"""
+
+        if self.engine is None:
+            raise RuntimeError("MySQLClientManager.init() must be called first")
+        return self.engine
+
     async def close(self) -> None:
         """Dispose the pool safely, even when called more than once."""
 

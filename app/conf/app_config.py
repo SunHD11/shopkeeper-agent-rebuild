@@ -116,6 +116,28 @@ class LLMConfig:
     # 硅基流动的 OpenAI 兼容 API 地址。
     base_url: str = ""
 
+    # 单次模型请求的网络超时和自动重试次数。只重试模型网络层的临时失败，
+    # 不重试已经进入 DW MySQL 的 SQL，避免一次问数被重复执行。
+    timeout_seconds: float = 60
+    max_retries: int = 1
+
+
+@dataclass
+class RuntimeConfig:
+    """在线问数执行边界。"""
+
+    query_timeout_seconds: float = 120
+    retrieval_timeout_seconds: float = 20
+    health_timeout_seconds: float = 5
+    max_concurrent_queries: int = 4
+
+
+@dataclass
+class APIConfig:
+    """HTTP 边界配置。"""
+
+    cors_allowed_origins: list[str]
+
 
 @dataclass
 class AppConfig:
@@ -128,6 +150,8 @@ class AppConfig:
     embedding: EmbeddingConfig
     es: ESConfig
     llm: LLMConfig
+    runtime: RuntimeConfig
+    api: APIConfig
 
 
 def load_app_config(

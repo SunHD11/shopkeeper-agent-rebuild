@@ -17,6 +17,8 @@
 filter_metric 再选择当前问题真正需要使用的最小指标集合。
 """
 
+import asyncio
+
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import PromptTemplate
 from langgraph.runtime import Runtime
@@ -24,6 +26,7 @@ from langgraph.runtime import Runtime
 from app.agent.context import DataAgentContext
 from app.agent.llm import llm
 from app.agent.state import DataAgentState
+from app.conf.app_config import app_config
 from app.core.log import logger
 from app.entities.metric_info import MetricInfo
 from app.prompt.prompt_loader import load_prompt
@@ -71,10 +74,11 @@ async def recall_metric(
         metric_info_map: dict[str, MetricInfo] = {}
 
         for keyword in all_keywords:
-            embedding = await embedding_client.aembed_query(keyword)
-            current_metric_infos: list[
-                MetricInfo
-            ] = await metric_qdrant_repository.search(embedding)
+            async with asyncio.timeout(app_config.runtime.retrieval_timeout_seconds):
+                embedding = await embedding_client.aembed_query(keyword)
+                current_metric_infos: list[
+                    MetricInfo
+                ] = await metric_qdrant_repository.search(embedding)
 
             for metric_info in current_metric_infos:
                 if metric_info.id not in metric_info_map:

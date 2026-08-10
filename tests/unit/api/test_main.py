@@ -3,14 +3,15 @@
 import uuid
 from unittest.mock import Mock
 
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
 import main as main_module
 from app.core.context import request_id_ctx_var
 
 
-def test_main_app_metadata_and_query_route_are_registered() -> None:
-    """正式入口包含应用元数据以及 ``POST /api/query`` OpenAPI 路径。"""
+def test_main_app_metadata_and_routes_are_registered() -> None:
+    """正式入口包含问数以及存活、就绪检查路径。"""
 
     assert main_module.app.title == "Shopkeeper Agent Rebuild"
     assert main_module.app.version == "0.1.0"
@@ -18,6 +19,25 @@ def test_main_app_metadata_and_query_route_are_registered() -> None:
     operation = main_module.app.openapi()["paths"]["/api/query"]["post"]
     assert operation["summary"] == "执行自然语言问数查询"
     assert operation["tags"] == ["query"]
+    assert "/health/live" in main_module.app.openapi()["paths"]
+    assert "/health/ready" in main_module.app.openapi()["paths"]
+
+
+def test_main_app_uses_explicit_frontend_cors_allowlist() -> None:
+    """浏览器前端可以访问 API，但不会使用带凭据的通配符 Origin。"""
+
+    cors_middleware = next(
+        middleware
+        for middleware in main_module.app.user_middleware
+        if middleware.cls is CORSMiddleware
+    )
+
+    assert cors_middleware.kwargs["allow_origins"] == [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    assert "*" not in cors_middleware.kwargs["allow_origins"]
+    assert cors_middleware.kwargs["allow_credentials"] is True
 
 
 async def test_request_id_middleware_sets_header_and_restores_context(

@@ -44,6 +44,9 @@ llm = init_chat_model(
     # LLMConfig 使用 field(repr=False)，可以减少配置对象被打印时泄漏密钥的风险。
     # 代码中不要硬编码真实 Key，也不要在日志和测试输出中打印它。
     api_key=app_config.llm.api_key,
+    # SDK 只在网络层临时失败时自动重试一次；上层 Graph 仍只执行一遍业务节点。
+    timeout=app_config.llm.timeout_seconds,
+    max_retries=app_config.llm.max_retries,
     # temperature 控制模型输出的随机程度。
     #
     # 当前 Agent 的输出需要可解析、可执行且尽可能稳定：

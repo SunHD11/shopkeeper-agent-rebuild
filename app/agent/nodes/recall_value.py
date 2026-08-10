@@ -16,6 +16,8 @@
 所以这一条链路使用 Elasticsearch，而不是 Embedding + Qdrant。
 """
 
+import asyncio
+
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import PromptTemplate
 from langgraph.runtime import Runtime
@@ -23,6 +25,7 @@ from langgraph.runtime import Runtime
 from app.agent.context import DataAgentContext
 from app.agent.llm import llm
 from app.agent.state import DataAgentState
+from app.conf.app_config import app_config
 from app.core.log import logger
 from app.entities.value_info import ValueInfo
 from app.prompt.prompt_loader import load_prompt
@@ -74,9 +77,10 @@ async def recall_value(
         for keyword in all_keywords:
             # ES Repository 内部封装 match 查询、IK 分词、最低分数和结果转换；
             # 这里直接传文本，不需要先调用 Embedding Client。
-            current_value_infos: list[ValueInfo] = await value_es_repository.search(
-                keyword
-            )
+            async with asyncio.timeout(app_config.runtime.retrieval_timeout_seconds):
+                current_value_infos: list[ValueInfo] = await value_es_repository.search(
+                    keyword
+                )
 
             for value_info in current_value_infos:
                 if value_info.id not in value_info_map:
